@@ -1,0 +1,17 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "ML Smile Debug",
+            "request": "launch",
+            "type": "dart",
+            "flutterMode": "debug",
+        },
+        {
+            "name": "ML Smile Release",
+            "request": "launch",
+            "type": "dart",
+            "flutterMode": "release",
+        },
+    ],
+}

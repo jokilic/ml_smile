@@ -13,11 +13,13 @@ dependencies:
     sdk: flutter
 
   camera: ^0.9.4+5
+  confetti: ^0.6.0
   cupertino_icons: ^1.0.4
   get: ^4.6.1
   google_ml_kit:
     git:
       url: https://github.com/bharat-biradar/Google-Ml-Kit-plugin
+ 
 
 dev_dependencies:
   flutter_test:
