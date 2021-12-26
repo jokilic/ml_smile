@@ -1,10 +1,13 @@
 import 'dart:developer';
-import 'dart:ui';
+import 'dart:io';
 
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import 'package:google_ml_kit/google_ml_kit.dart';
+import 'package:path_provider/path_provider.dart';
 
 class MainController extends GetxController with StateMixin<CameraController> {
   /// ------------------------
@@ -14,6 +17,8 @@ class MainController extends GetxController with StateMixin<CameraController> {
   final RxString _message = ''.obs;
   final RxBool _isProcessingImage = false.obs;
   final RxBool _smiling = false.obs;
+  final RxBool _takingPhoto = false.obs;
+  final RxBool _confetti = false.obs;
 
   /// Related to ML Kit - Face detection
   late FaceDetector _faceDetector;
@@ -30,6 +35,8 @@ class MainController extends GetxController with StateMixin<CameraController> {
   String get message => _message.value;
   bool get isProcessingImage => _isProcessingImage.value;
   bool get smiling => _smiling.value;
+  bool get takingPhoto => _takingPhoto.value;
+  bool get confetti => _confetti.value;
 
   FaceDetector get faceDetector => _faceDetector;
 
@@ -44,6 +51,8 @@ class MainController extends GetxController with StateMixin<CameraController> {
   set message(String value) => _message.value = value;
   set isProcessingImage(bool value) => _isProcessingImage.value = value;
   set smiling(bool value) => _smiling.value = value;
+  set takingPhoto(bool value) => _takingPhoto.value = value;
+  set confetti(bool value) => _confetti.value = value;
 
   set faceDetector(FaceDetector value) => _faceDetector = value;
 
@@ -207,8 +216,11 @@ class MainController extends GetxController with StateMixin<CameraController> {
         /// Found some faces, check if first face is smiling
         checkSmiling(faces.first);
       } else {
-        message = 'Show your face 🌝';
         smiling = false;
+
+        if (!takingPhoto) {
+          message = 'Show your face 🌝';
+        }
       }
 
       isProcessingImage = false;
@@ -228,16 +240,165 @@ class MainController extends GetxController with StateMixin<CameraController> {
       if (smilingProbability < 0.75) {
         /// Face is not smiling
         smiling = false;
-        message = 'Smile 😁';
+
+        if (!takingPhoto) {
+          message = 'Smile 😁';
+        }
       } else {
         /// Face is smiling
         smiling = true;
-        message = 'Wohoo 🎉';
+
+        if (!takingPhoto) {
+          takePicture();
+        }
       }
     } catch (e) {
       final error = 'CheckSmiling error: $e';
       log(error);
       change(null, status: RxStatus.error(error));
     }
+  }
+
+  /// Called when photo needs to be taken
+  Future<void> takePicture() async {
+    /// Used because this method would be called continuously
+    takingPhoto = true;
+
+    /// Waiting 3 seconds before taking photo to make sure the user is smiling
+    message = 'Keep smiling... 😁';
+    await Future.delayed(const Duration(milliseconds: 1600));
+
+    /// Face is not smiling, don't take picture
+    if (!smiling) {
+      takingPhoto = false;
+      return;
+    }
+
+    /// Face is smiling, try to take picture
+    try {
+      /// Camera controller isn't initialized, don't take picture
+      if (cameraController == null || !cameraController!.value.isInitialized) {
+        takingPhoto = false;
+        log("CameraController isn't initialized");
+        return;
+      }
+
+      /// Camera is already taking a picture, don't take another picture
+      if (cameraController!.value.isTakingPicture) {
+        takingPhoto = false;
+        log('Camera is already capturing a picture');
+        return;
+      }
+
+      /// Take a picture
+      try {
+        message = 'Taking photo... 📷';
+
+        /// Need to stop image stream before taking photo because of errors
+        await cameraController?.stopImageStream();
+
+        /// Take the picture
+        final picture = await cameraController?.takePicture();
+
+        /// Start stream again after taking photo
+        await cameraController?.startImageStream(processCameraImage);
+
+        log('Picture taken: ${picture?.path}');
+
+        /// Store the picture in the application directory
+        final file = File(picture?.path ?? '');
+        final picturePath = await storePictureInApplicationDirectory(file);
+
+        /// Show snackbar informing the user of success, proper message, confetti and exit app
+        await pictureSuccess(picturePath ?? '');
+      } on CameraException catch (e) {
+        takingPhoto = false;
+        final error = 'TakePicture CameraException error: $e';
+        log(error);
+        change(null, status: RxStatus.error(error));
+      } catch (e) {
+        takingPhoto = false;
+        final error = 'TakePicture error: $e';
+        log(error);
+        change(null, status: RxStatus.error(error));
+      }
+    } catch (e) {
+      takingPhoto = false;
+      final error = 'TakePicture error (last catch block): $e';
+      log(error);
+      change(null, status: RxStatus.error(error));
+    }
+  }
+
+  /// Get application directory
+  Future<String?> getApplicationDirectory() async {
+    try {
+      /// External storage directory
+      final applicationDirectory = await getExternalStorageDirectory();
+      final applicationDirectoryPath = applicationDirectory?.path;
+      log('ExternalStorageDirectoryPath: $applicationDirectoryPath');
+
+      return applicationDirectoryPath;
+    } catch (e) {
+      final error = 'GetApplicationDirectory error: $e';
+      log(error);
+      change(null, status: RxStatus.error(error));
+      return null;
+    }
+  }
+
+  /// Store the picture in the application directory
+  Future<String?> storePictureInApplicationDirectory(File file) async {
+    try {
+      final appDirectoryPath = await getApplicationDirectory();
+      final fullPath = '$appDirectoryPath/ml_smile.jpg';
+
+      await file.copy(fullPath);
+
+      log('Picture stored: $fullPath');
+
+      return fullPath;
+    } catch (e) {
+      final error = 'StorePictureInApplicationDirectory error: $e';
+      log(error);
+      change(null, status: RxStatus.error(error));
+      return null;
+    }
+  }
+
+  /// 1. Show snackbar informing the user of success
+  /// 2. Show proper message
+  /// 3. Show confetti
+  /// 4. Exit app
+  Future<void> pictureSuccess(String path) async {
+    /// Show snackbar
+    Get.snackbar(
+      'Picture taken',
+      'Check it somewhere on the device',
+      icon: const Icon(
+        Icons.mood,
+        color: Colors.white,
+        size: 32,
+      ),
+      backgroundColor: Colors.transparent,
+      colorText: Colors.white,
+      borderColor: Colors.white,
+      borderWidth: 2,
+      shouldIconPulse: false,
+      forwardAnimationCurve: Curves.easeIn,
+      reverseAnimationCurve: Curves.easeOut,
+      snackPosition: SnackPosition.BOTTOM,
+      duration: const Duration(seconds: 6),
+    );
+
+    /// Show message and confetti
+    message = 'Wohoo 🎉';
+    confetti = true;
+
+    /// Exit app
+    await Future.delayed(const Duration(seconds: 6));
+    message = 'Goodbye 👋';
+    await Future.delayed(const Duration(seconds: 2));
+    await SystemNavigator.pop();
   }
 }

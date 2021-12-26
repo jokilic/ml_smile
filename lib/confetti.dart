@@ -33,5 +33,6 @@ class _ConfettiState extends State<Confetti> {
   Widget build(BuildContext context) => ConfettiWidget(
         confettiController: confettiController,
         blastDirectionality: BlastDirectionality.explosive,
+        shouldLoop: true,
       );
 }

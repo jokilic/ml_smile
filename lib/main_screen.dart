@@ -33,7 +33,7 @@ class MainScreen extends StatelessWidget {
                     textAlign: TextAlign.center,
                   ),
                 ),
-                if (mainController.smiling)
+                if (mainController.confetti)
                   Align(
                     alignment: const Alignment(0, -0.5),
                     child: Confetti(),

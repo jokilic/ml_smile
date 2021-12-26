@@ -19,6 +19,7 @@ dependencies:
   google_ml_kit:
     git:
       url: https://github.com/bharat-biradar/Google-Ml-Kit-plugin
+  path_provider: ^2.0.8
  
 
 dev_dependencies:
