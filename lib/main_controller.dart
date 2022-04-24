@@ -1,4 +1,3 @@
-import 'dart:developer';
 import 'dart:io';
 
 import 'package:camera/camera.dart';
@@ -7,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import 'package:google_ml_kit/google_ml_kit.dart';
+import 'package:logger/logger.dart';
 import 'package:path_provider/path_provider.dart';
 
 class MainController extends GetxController with StateMixin<CameraController> {
@@ -14,51 +14,34 @@ class MainController extends GetxController with StateMixin<CameraController> {
   /// VARIABLES
   /// ------------------------
 
-  final RxString _message = ''.obs;
-  final RxBool _isProcessingImage = false.obs;
-  final RxBool _smiling = false.obs;
-  final RxBool _takingPhoto = false.obs;
-  final RxBool _confetti = false.obs;
+  /// Related to [Logger]
+  late final Logger logger = Logger(
+    printer: PrettyPrinter(
+      methodCount: 0,
+      errorMethodCount: 3,
+      lineLength: 50,
+      noBoxingByDefault: true,
+    ),
+  );
 
-  /// Related to ML Kit - Face detection
-  late FaceDetector _faceDetector;
-
-  /// Related to Camera
-  final RxList<CameraDescription> _cameras = <CameraDescription>[].obs;
-  late CameraController? _cameraController;
-  final RxInt _cameraIndex = 0.obs;
-
-  /// ------------------------
-  /// GETTERS
-  /// ------------------------
-
+  /// Reactive `message` variable, getter & setter
+  final _message = ''.obs;
   String get message => _message.value;
-  bool get isProcessingImage => _isProcessingImage.value;
-  bool get smiling => _smiling.value;
-  bool get takingPhoto => _takingPhoto.value;
-  bool get confetti => _confetti.value;
-
-  FaceDetector get faceDetector => _faceDetector;
-
-  List<CameraDescription> get cameras => _cameras;
-  CameraController? get cameraController => _cameraController;
-  int get cameraIndex => _cameraIndex.value;
-
-  /// ------------------------
-  /// SETTERS
-  /// ------------------------
-
   set message(String value) => _message.value = value;
-  set isProcessingImage(bool value) => _isProcessingImage.value = value;
-  set smiling(bool value) => _smiling.value = value;
-  set takingPhoto(bool value) => _takingPhoto.value = value;
-  set confetti(bool value) => _confetti.value = value;
 
-  set faceDetector(FaceDetector value) => _faceDetector = value;
+  /// Related to our custom logic
+  var isProcessingImage = false;
+  var smiling = false;
+  var takingPhoto = false;
+  var confetti = false;
 
-  set cameras(List<CameraDescription> value) => _cameras.assignAll(value);
-  set cameraController(CameraController? value) => _cameraController = value;
-  set cameraIndex(int value) => _cameraIndex.value = value;
+  /// Related to [ML Kit] - Face detection
+  late final FaceDetector faceDetector;
+
+  /// Related to [Camera]
+  var cameras = <CameraDescription>[];
+  late final CameraController? cameraController;
+  var cameraIndex = 0;
 
   /// ------------------------
   /// INIT
@@ -69,6 +52,7 @@ class MainController extends GetxController with StateMixin<CameraController> {
     super.onInit();
 
     /// Initialize everything
+    // initializeLogger();
     initializeFaceDetector();
     await initializeCamera();
     change(cameraController, status: RxStatus.success());
@@ -91,7 +75,19 @@ class MainController extends GetxController with StateMixin<CameraController> {
   /// METHODS
   /// ------------------------
 
-  /// Called to initialize face detector
+  /// Called to initialize [Logger]
+  // void initializeLogger() {
+  //   logger = Logger(
+  //     printer: PrettyPrinter(
+  //       methodCount: 0,
+  //       errorMethodCount: 3,
+  //       lineLength: 50,
+  //       noBoxingByDefault: true,
+  //     ),
+  //   );
+  // }
+
+  /// Called to initialize `faceDetector`
   void initializeFaceDetector() {
     try {
       faceDetector = GoogleMlKit.vision.faceDetector(
@@ -102,12 +98,12 @@ class MainController extends GetxController with StateMixin<CameraController> {
       );
     } catch (e) {
       final error = 'InitializeFaceDetector error: $e';
-      log(error);
+      logger.e(error);
       change(null, status: RxStatus.error(error));
     }
   }
 
-  /// Called to initialize front camera
+  /// Called to initialize `front camera`
   Future<void> initializeCamera() async {
     try {
       /// Get available cameras
@@ -124,33 +120,34 @@ class MainController extends GetxController with StateMixin<CameraController> {
       await startLiveFeed();
     } on CameraException catch (e) {
       final error = 'InitializeCamera CameraException error: $e';
-      log(error);
+      logger.e(error);
       change(null, status: RxStatus.error(error));
     } catch (e) {
       final error = 'InitializeCamera error: $e';
-      log(error);
+      logger.e(error);
       change(null, status: RxStatus.error(error));
     }
   }
 
-  /// Initializes CameraController and starts live feed
+  /// Initializes `CameraController` and starts live feed
   Future<void> startLiveFeed() async {
     try {
       final camera = cameras[cameraIndex];
 
-      /// Instantiate a CameraController
+      /// Instantiate a `CameraController`
       cameraController = CameraController(
         camera,
         ResolutionPreset.low,
         enableAudio: false,
       );
+
       await cameraController?.initialize();
 
       /// Start the stream and pass in a method that handles what the camera sees
       await cameraController?.startImageStream(processCameraImage);
     } catch (e) {
       final error = 'StartLiveFeed error: $e';
-      log(error);
+      logger.e(error);
       change(null, status: RxStatus.error(error));
     }
   }
@@ -159,7 +156,7 @@ class MainController extends GetxController with StateMixin<CameraController> {
   /// Gets called continuously
   Future<void> processCameraImage(CameraImage image) async {
     try {
-      /// Process current camera feed and store in an InputImage variable
+      /// Process current camera feed and store in an [InputImage] variable
       final allBytes = WriteBuffer();
       for (final plane in image.planes) {
         allBytes.putUint8List(plane.bytes);
@@ -169,9 +166,9 @@ class MainController extends GetxController with StateMixin<CameraController> {
       final imageSize = Size(image.width.toDouble(), image.height.toDouble());
 
       final camera = cameras[cameraIndex];
-      final imageRotation = InputImageRotationMethods.fromRawValue(camera.sensorOrientation) ?? InputImageRotation.Rotation_0deg;
+      final imageRotation = InputImageRotationValue.fromRawValue(camera.sensorOrientation) ?? InputImageRotation.rotation0deg;
 
-      final inputImageFormat = InputImageFormatMethods.fromRawValue(image.format.raw) ?? InputImageFormat.NV21;
+      final inputImageFormat = InputImageFormatValue.fromRawValue(image.format.raw) ?? InputImageFormat.nv21;
 
       final planeData = image.planes
           .map(
@@ -192,16 +189,16 @@ class MainController extends GetxController with StateMixin<CameraController> {
 
       final inputImage = InputImage.fromBytes(bytes: bytes, inputImageData: inputImageData);
 
-      /// Process current image with Google ML Kit
+      /// Process current image with [Google ML Kit]
       await processMLKitImage(inputImage);
     } catch (e) {
       final error = 'ProcessCameraImage error: $e';
-      log(error);
-      change(null, status: RxStatus.error(error));
+      logger.e(error);
+      // change(null, status: RxStatus.error(error));
     }
   }
 
-  /// Called when the MLKit is processing current image
+  /// Called when the [MLKit] is processing current image
   /// Gets called continuously
   Future<void> processMLKitImage(InputImage inputImage) async {
     try {
@@ -226,16 +223,18 @@ class MainController extends GetxController with StateMixin<CameraController> {
       isProcessingImage = false;
     } catch (e) {
       final error = 'ProcessMLKitImage error: $e';
-      log(error);
-      change(null, status: RxStatus.error(error));
+      logger.e(error);
+      // change(null, status: RxStatus.error(error));
     }
   }
 
-  /// Checks if face is smiling
+  /// Checks if `face is smiling`
   /// Gets called continuously
   void checkSmiling(Face face) {
     try {
       final smilingProbability = face.smilingProbability ?? 0;
+
+      // logger.w('Smiling probability: $smilingProbability');
 
       if (smilingProbability < 0.75) {
         /// Face is not smiling
@@ -254,8 +253,8 @@ class MainController extends GetxController with StateMixin<CameraController> {
       }
     } catch (e) {
       final error = 'CheckSmiling error: $e';
-      log(error);
-      change(null, status: RxStatus.error(error));
+      logger.e(error);
+      // change(null, status: RxStatus.error(error));
     }
   }
 
@@ -264,7 +263,7 @@ class MainController extends GetxController with StateMixin<CameraController> {
     /// Used because this method would be called continuously
     takingPhoto = true;
 
-    /// Waiting 3 seconds before taking photo to make sure the user is smiling
+    /// Waiting some time before taking photo to make sure the user is smiling
     message = 'Keep smiling... 😁';
     await Future.delayed(const Duration(milliseconds: 1600));
 
@@ -279,14 +278,14 @@ class MainController extends GetxController with StateMixin<CameraController> {
       /// Camera controller isn't initialized, don't take picture
       if (cameraController == null || !cameraController!.value.isInitialized) {
         takingPhoto = false;
-        log("CameraController isn't initialized");
+        logger.e("CameraController isn't initialized");
         return;
       }
 
       /// Camera is already taking a picture, don't take another picture
       if (cameraController!.value.isTakingPicture) {
         takingPhoto = false;
-        log('Camera is already capturing a picture');
+        logger.e('Camera is already capturing a picture');
         return;
       }
 
@@ -294,7 +293,7 @@ class MainController extends GetxController with StateMixin<CameraController> {
       try {
         message = 'Taking photo... 📷';
 
-        /// Need to stop image stream before taking photo because of errors
+        /// Need to stop image stream before taking photo because of potential errors
         await cameraController?.stopImageStream();
 
         /// Take the picture
@@ -303,65 +302,74 @@ class MainController extends GetxController with StateMixin<CameraController> {
         /// Start stream again after taking photo
         await cameraController?.startImageStream(processCameraImage);
 
-        log('Picture taken: ${picture?.path}');
+        /// Picture is successfully taken, continue with the rest of the logic
+        if (picture != null) {
+          logger.wtf('Picture taken: ${picture.path}');
 
-        /// Store the picture in the application directory
-        final file = File(picture?.path ?? '');
-        final picturePath = await storePictureInApplicationDirectory(file);
+          /// Store the picture in the application directory
+          final file = File(picture.path);
+          final picturePath = await storePictureInExternalDirectory(file);
 
-        /// Show snackbar informing the user of success, proper message, confetti and exit app
-        await pictureSuccess(picturePath ?? '');
+          /// Show snackbar informing the user of success, proper message, confetti and exit app
+          await pictureSuccess(picturePath ?? '');
+        }
+
+        /// Picture is not taken successfully
+        else {
+          logger.e('Picture is not taken successfully');
+          return;
+        }
       } on CameraException catch (e) {
         takingPhoto = false;
         final error = 'TakePicture CameraException error: $e';
-        log(error);
-        change(null, status: RxStatus.error(error));
+        logger.e(error);
+        // change(null, status: RxStatus.error(error));
       } catch (e) {
         takingPhoto = false;
         final error = 'TakePicture error: $e';
-        log(error);
-        change(null, status: RxStatus.error(error));
+        logger.e(error);
+        // change(null, status: RxStatus.error(error));
       }
     } catch (e) {
       takingPhoto = false;
       final error = 'TakePicture error (last catch block): $e';
-      log(error);
-      change(null, status: RxStatus.error(error));
+      logger.e(error);
+      // change(null, status: RxStatus.error(error));
     }
   }
 
-  /// Get application directory
-  Future<String?> getApplicationDirectory() async {
+  /// Store the picture in `external directory`
+  Future<String?> storePictureInExternalDirectory(File file) async {
     try {
-      /// External storage directory
-      final applicationDirectory = await getExternalStorageDirectory();
-      final applicationDirectoryPath = applicationDirectory?.path;
-      log('ExternalStorageDirectoryPath: $applicationDirectoryPath');
+      final externalDirectoryPath = await getExtStorageDirectory();
+      final fullPath = '$externalDirectoryPath/ml_smile.jpg';
 
-      return applicationDirectoryPath;
+      await file.copy(fullPath);
+
+      logger.wtf('Picture stored: $fullPath');
+
+      return fullPath;
     } catch (e) {
-      final error = 'GetApplicationDirectory error: $e';
-      log(error);
-      change(null, status: RxStatus.error(error));
+      final error = 'StorePictureInExternalDirectory error: $e';
+      logger.e(error);
+      // change(null, status: RxStatus.error(error));
       return null;
     }
   }
 
-  /// Store the picture in the application directory
-  Future<String?> storePictureInApplicationDirectory(File file) async {
+  /// Get `external storage` directory
+  Future<String?> getExtStorageDirectory() async {
     try {
-      final appDirectoryPath = await getApplicationDirectory();
-      final fullPath = '$appDirectoryPath/ml_smile.jpg';
+      /// External storage directory
+      final externalStorageDirectory = await getExternalStorageDirectory();
+      final externalStorageDirectoryPath = externalStorageDirectory?.path;
+      logger.v('ExternalStorageDirectoryPath: $externalStorageDirectoryPath');
 
-      await file.copy(fullPath);
-
-      log('Picture stored: $fullPath');
-
-      return fullPath;
+      return externalStorageDirectoryPath;
     } catch (e) {
-      final error = 'StorePictureInApplicationDirectory error: $e';
-      log(error);
-      change(null, status: RxStatus.error(error));
+      final error = 'GetExtStorageDirectory error: $e';
+      logger.e(error);
+      // change(null, status: RxStatus.error(error));
       return null;
     }
   }
@@ -374,7 +382,7 @@ class MainController extends GetxController with StateMixin<CameraController> {
     /// Show snackbar
     Get.snackbar(
       'Picture taken',
-      'Check it somewhere on the device',
+      'Find it in the `Download` folder',
       icon: const Icon(
         Icons.mood,
         color: Colors.white,
